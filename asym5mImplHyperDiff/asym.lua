@@ -433,7 +433,7 @@ function updateSource(elcIn, ionIn, emfIn, tCurr, tEnd)
    srcSlvr:advance(tEnd)
 
    if applyDiff then
-      for dir = 0,1,2 do
+      for dir = 0,2 do
 -- applying diffusion on electron only
          local rhov_e = elcIn:alias(dir+1,dir+2)
 

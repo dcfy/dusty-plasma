@@ -73,6 +73,8 @@ dMin = math.min( Lx/Nx, Ly/Ny )
 dtHyp = cfl*dMin/lightSpeed
 alpha = 0.5*dMin^2/dtHyp * dtRatio
 dtDiff = 0.5*dMin^2/alpha
+canSkipDiff = true
+doResetDiff = true
 
 numFluids = 2
 charge = {qe, qi}
@@ -238,6 +240,9 @@ qNew = createData()
 qDup = createData()
 if applyDiff then
    qDiff = createData(1)
+   if canSkipDiff then
+      rhovDup = createData(3)
+   end
 end
 
 getFields = function(myQ)
@@ -372,6 +377,12 @@ srcSlvr = Updater.ImplicitFiveMomentSrc2D {
 
 if applyDiff then
    diffCalc = Updater.RectSecondOrderCentralDiff2D { onGrid = grid }
+  
+   -- ramp down diffusion to zero at wall boudnaries
+   function resetDiff(x,y,z,val)
+      return val * 0.5 * (math.cos(2*math.pi*y/Ly) +  1)
+   end
+
 end
 
 function updateSource(elcIn, ionIn, emfIn, tCurr, tEnd)
@@ -381,7 +392,11 @@ function updateSource(elcIn, ionIn, emfIn, tCurr, tEnd)
    srcSlvr:advance(tEnd)
 
    if applyDiff then
-      for dir = 0,1,2 do
+      local rhov_e3 = elcIn:alias(1,4)
+      if (canSkipDiff) then
+         rhovDup:copy(rhov_e3)
+      end
+      for dir = 0,2 do
 -- applying diffusion on electron only
          local rhov_e = elcIn:alias(dir+1,dir+2)
          rhov_e:sync()
@@ -390,8 +405,15 @@ function updateSource(elcIn, ionIn, emfIn, tCurr, tEnd)
          diffCalc:setIn( {rhov_e} )
          diffCalc:setOut( {qDiff} )
          diffCalc:advance(tEnd)
+         if doResetDiff then
+            qDiff:set(resetDiff)
+         end
 
          rhov_e:accumulate(alpha*dt, qDiff)
+      end
+      if (canSkipDiff and fluidEqn:checkInvariantDomain(elcIn) == false) then
+         log(" ** Parabolic source leads to negative pressure. Will skip it.")
+         rhov_e3:copy(rhovDup)
       end
    end
 end
