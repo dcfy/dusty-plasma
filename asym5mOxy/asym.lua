@@ -2,6 +2,7 @@
 --[[
   2D FIVE-MOMENT SIMULATION
   ASYMMETRIC RECONNECTION WITHOUT GUIDE FIELD
+  IONS: HYDROGEN+OXYGEN
   Based on Chen et al. 2016 10.1002/2016GL068243
   NOTES:
   * The L,M,N coordinates in the paper translate to x, y, -z in this script.
@@ -9,18 +10,37 @@
 
 log = function(...) Lucee.logInfo(string.format(...)) end
 
+function HERE()
+   local info = debug.getinfo(2)
+   str = string.format("HERE: %d %s: %s",
+       info.currentline, info.source, tostring(info.name))
+   log(str)
+end
+
 lightSpeed = 1
 mu0 = 1
 epsilon0 = 1/math.sqrt(lightSpeed)/mu0
 
-n0 = 1 -- thus wpi0 = 1, di0 = 1
+n0 = 1
+-- H+
+-- wpi0 = 1, di0 = 1
 mi = 1
 qi = 1
+-- O+
+mo = 16
+qo = 1
+-- e-
 me = 1/25
 qe = -1
 -- fractions of species temperatures to total temperature
-Ti_Ttot = 2/3
+Ti_Ttot = 1/3
+To_Ttot = 1/3
 Te_Ttot = 1/3
+-- fractions of species number density to total number density
+ni_ntot = 1/2
+no_ntot = 1/2
+ne_ntot = 1
+
 n1_n0 = 1/8
 wpe_wce = 2
 beta0 = 1
@@ -77,9 +97,9 @@ dtDiff = 0.5*dMin^2/alpha
 canSkipDiff = true
 doResetDiff = true
 
-numFluids = 2
-charge = {qe, qi}
-mass = {me, mi}
+numFluids = 3
+charge = {qe, qi, qo}
+mass = {me, mi, mo}
 
 writeFwdFields = true
 fwdFields_start = 0
@@ -141,8 +161,12 @@ init = function(x,y,z)
    local nh = nc * icosh2y
    local nb = 0.5*(n1+n0) + 0.5*(n0-n1)*tanhy
    local n = nh+nb
-   local rho_e = n*me
-   local rho_i = n*mi
+   local n_e = n * ne_ntot
+   local n_i = n * ni_ntot
+   local n_o = n * no_ntot
+   local rho_e = n_e*me
+   local rho_i = n_i*mi
+   local rho_o = n_o*mo
 
    local Bxb = 0.5*(B1-B0) - 0.5*(B1+B0)*tanhy
    local Bx = Bxb + psi0*(Pi/Ly) * math.cos(2*Pi*x/Lx) * math.sin(Pi*y/Ly) 
@@ -153,23 +177,29 @@ init = function(x,y,z)
 
    local rhovx_e, rhovy_e = 0,0
    local rhovx_i, rhovy_i = 0,0
+   local rhovx_o, rhovy_o = 0,0
    local jz = 0.5*(B1+B0)/l/mu0 * icosh2y
    local jz_e = jz * Te_Ttot -- current partition due to diamagnetic drift
    local rhovz_e = jz_e * me/qe * (1 + Vnoise_level*math.random()*math.random(-1,1))
    local jz_i = jz * Ti_Ttot
    local rhovz_i = jz_i * mi/qi * (1 + Vnoise_level*math.random()*math.random(-1,1))
+   local jz_o = jz * To_Ttot
+   local rhovz_o = jz_o * mo/qo * (1 + Vnoise_level*math.random()*math.random(-1,1))
 
    local p = n*kTtotal
    local p_e = p * Te_Ttot
    local u_e = p_e / (gasGamma-1) + 0.5*rhovz_e^2/rho_e
    local p_i = p * Ti_Ttot 
    local u_i = p_i / (gasGamma-1) + 0.5*rhovz_i^2/rho_i
+   local p_o = p * Ti_Ttot 
+   local u_o = p_o / (gasGamma-1) + 0.5*rhovz_o^2/rho_o
 
    local Ex,Ey,Ez = 0, 0, 0
 
    return
       rho_e, rhovx_e, rhovy_e, rhovz_e, u_e,
       rho_i, rhovx_i, rhovy_i, rhovz_i, u_i,
+      rho_o, rhovx_o, rhovy_o, rhovz_o, u_o,
       Ex, Ey, Ez, Bx, By, Bz, 0,0
 end
 
@@ -194,9 +224,12 @@ bcElcWall = BoundaryCondition.ZeroNormal { components = {1, 2, 3} }
 bcIonCopy = BoundaryCondition.Copy { components = {5, 9} }
 bcIonWall = BoundaryCondition.ZeroNormal { components = {6, 7, 8} }
 
-bcElcFld = BoundaryCondition.ZeroTangent { components = {10, 11, 12} }
-bcMgnFld = BoundaryCondition.ZeroNormal { components = {13, 14, 15} }
-bcPot = BoundaryCondition.Copy { components = {16, 17}, fact = {-1, 1} }
+bcOxyCopy = BoundaryCondition.Copy { components = {10, 14} }
+bcOxyWall = BoundaryCondition.ZeroNormal { components = {11, 12, 13} }
+
+bcElcFld = BoundaryCondition.ZeroTangent { components = {15, 16, 17} }
+bcMgnFld = BoundaryCondition.ZeroNormal { components = {18, 19, 20} }
+bcPot = BoundaryCondition.Copy { components = {21, 22}, fact = {-1, 1} }
 
 function createBc(myDir, myEdge)
    local bc = Updater.Bc2D {
@@ -204,6 +237,7 @@ function createBc(myDir, myEdge)
       boundaryConditions = {
          bcElcCopy, bcElcWall,
          bcIonCopy, bcIonWall,
+         bcOxyCopy, bcOxyWall,
          bcElcFld, bcMgnFld, bcPot,
       },
       dir = myDir,
@@ -227,7 +261,7 @@ end
 ----------
 createData = function(numComponents)
    if not numComponents then
-      numComponents = 18
+      numComponents = numFluids*5+8
    end
    return DataStruct.Field2D {
       onGrid = grid,
@@ -247,11 +281,11 @@ if applyDiff then
 end
 
 getFields = function(myQ)
-   return myQ:alias(0,5), myQ:alias(5,10), myQ:alias(10,18)
+   return myQ:alias(0,5), myQ:alias(5,10), myQ:alias(10,15), myQ:alias(15,23)
 end
-elc,ion,emf = getFields(q)
-elcX,ionX,emfX = getFields(qX)
-elcNew,ionNew,emfNew = getFields(qNew)
+elc,ion,oxy,emf = getFields(q)
+elcX,ionX,oxyX,emfX = getFields(qX)
+elcNew,ionNew,oxyNew,emfNew = getFields(qNew)
 
 ---------------------------------------
 -- HYPERBOLIC EQUATIONS AND SOLVERS --
@@ -282,31 +316,35 @@ end
 
 elcEqnSlvrDir0 = createSlvrDir(fluidEqn, elc, elcX, 0, limiter)
 ionEqnSlvrDir0 = createSlvrDir(fluidEqn, ion, ionX, 0, limiter)
+oxyEqnSlvrDir0 = createSlvrDir(fluidEqn, oxy, oxyX, 0, limiter)
 emfEqnSlvrDir0 = createSlvrDir(emfEqn, emf, emfX, 0, limiter)
 
 elcEqnSlvrDir1 = createSlvrDir(fluidEqn, elcX, elcNew, 1, limiter)
 ionEqnSlvrDir1 = createSlvrDir(fluidEqn, ionX, ionNew, 1, limiter)
+oxyEqnSlvrDir1 = createSlvrDir(fluidEqn, oxyX, oxyNew, 1, limiter)
 emfEqnSlvrDir1 = createSlvrDir(emfEqn, emfX, emfNew, 1, limiter)
 
 elcEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, elc, elcX, 0, "zero")
 ionEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, ion, ionX, 0, "zero")
+oxyEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, oxy, oxyX, 0, "zero")
 emfEqnSlvrDir0Lax = createSlvrDir(emfEqn, emf, emfX, 0, "zero")
 
 elcEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, elcX, elcNew, 1, "zero")
 ionEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, ionX, ionNew, 1, "zero")
+oxyEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, oxyX, oxyNew, 1, "zero")
 emfEqnSlvrDir1Lax = createSlvrDir(emfEqn, emfX, emfNew, 1, "zero")
 
 ----------------------------------
 -- HYPERBOLIC EQUATION UPDATERS --
 ----------------------------------
 slvrs = {
-   {elcEqnSlvrDir0, ionEqnSlvrDir0, emfEqnSlvrDir0},
-   {elcEqnSlvrDir1, ionEqnSlvrDir1, emfEqnSlvrDir1},
+   {elcEqnSlvrDir0, ionEqnSlvrDir0, oxyEqnSlvrDir0, emfEqnSlvrDir0},
+   {elcEqnSlvrDir1, ionEqnSlvrDir1, oxyEqnSlvrDir1, emfEqnSlvrDir1},
 }
 
 slvrsLax = {
-   {elcEqnSlvrDir0Lax, ionEqnSlvrDir0Lax, emfEqnSlvrDir0Lax},
-   {elcEqnSlvrDir1Lax, ionEqnSlvrDir1Lax, emfEqnSlvrDir1Lax},
+   {elcEqnSlvrDir0Lax, ionEqnSlvrDir0Lax, oxyEqnSlvrDir0Lax, emfEqnSlvrDir0Lax},
+   {elcEqnSlvrDir1Lax, ionEqnSlvrDir1Lax, oxyEqnSlvrDir1Lax, emfEqnSlvrDir1Lax},
 }
 
 qIn = {q, qX}
@@ -314,6 +352,7 @@ qOut = {qX, qNew}
 
 elcOut = {elcX, elcNew}
 ionOut = {ionX, ionNew}
+oxyOut = {oxyX, oxyNew}
 
 function updateHyperEqns(tCurr, tEnd)
    local myStatus = true
@@ -331,6 +370,7 @@ function updateHyperEqns(tCurr, tEnd)
 
       if ((fluidEqn:checkInvariantDomain(elcOut[d+1]) == false)
        or (fluidEqn:checkInvariantDomain(ionOut[d+1]) == false)
+       or (fluidEqn:checkInvariantDomain(oxyOut[d+1]) == false)
        or (qOut[d+1]:hasNan())) then
          useLaxFlux = true
       end
@@ -386,9 +426,9 @@ if applyDiff then
 
 end
 
-function updateSource(elcIn, ionIn, emfIn, tCurr, tEnd)
+function updateSource(elcIn, ionIn, oxyIn, emfIn, tCurr, tEnd)
    local dt = tEnd - tCurr
-   srcSlvr:setOut( {elcIn, ionIn, emfIn} )
+   srcSlvr:setOut( {elcIn, ionIn, oxyIn, emfIn} )
    srcSlvr:setCurrTime(tCurr)
    srcSlvr:advance(tEnd)
 
@@ -435,11 +475,11 @@ function updateSystem(tCurr, tEnd)
       end
    end
 
-   updateSource(elc, ion, emf, tCurr, tCurr+dthalf)
+   updateSource(elc, ion, oxy, emf, tCurr, tCurr+dthalf)
 
    local status, dtSuggested, useLaxFlux = updateHyperEqns(tCurr, tEnd)
 
-   updateSource(elcNew, ionNew, emfNew, tCurr, tCurr+dthalf)
+   updateSource(elcNew, ionNew, oxyNew, emfNew, tCurr, tCurr+dthalf)
 
    return status, dtSuggested, useLaxFlux
 end
@@ -457,11 +497,11 @@ function updateSystemLax(tCurr, tEnd)
       end
    end
 
-   updateSource(elc, ion, emf, tCurr, tCurr+dthalf)
+   updateSource(elc, ion, oxy, emf, tCurr, tCurr+dthalf)
 
    local status, dtSuggested = updateHyperEqnsLax(tCurr, tEnd)
 
-   updateSource(elcNew, ionNew, emfNew, tCurr, tCurr+dthalf)
+   updateSource(elcNew, ionNew, oxyNew, emfNew, tCurr, tCurr+dthalf)
 
    return status, dtSuggested
 end
