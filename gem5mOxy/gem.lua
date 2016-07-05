@@ -16,94 +16,147 @@ end
 
 lightSpeed = 1
 mu0 = 1
-epsilon0 = 1/math.sqrt(lightSpeed)/mu0
+epsilon0 = 1/lightSpeed^2/mu0
+gasGamma = 5/3
 
-n0 = 1
+-- mass and charge of each species
+-- e-
+me = 1/25
+qe = -1
 -- H+
--- wpi0 = 1, di0 = 1
 mi = 1
 qi = 1
 -- O+
 mo = 16
 qo = 1
--- e-
-me = 1/25
-qe = -1
--- fractions of species temperatures to total temperature
-Ti_Ttot = 1/3
-To_Ttot = 1/3
-Te_Ttot = 1/3
+-- fractions of species pressures to total pressure
+-- used to decompose current according to diamagnetic drift
+pe_frac = 1/3
+pi_frac = 1/3
+po_frac = 1/3
 -- fractions of species number density to total number density
-ni_ntot = 1/2
-no_ntot = 1/2
-ne_ntot = 1
+-- negative charged species fractions should add up to 1
+-- positive charged species fractions should add up to 1
+ne_frac = 1
+ni_frac = 1/2
+no_frac = 1/2
 
+-- characteristic number density of all negatively/positively charged species
+n0 = 1
+-- to compute background number density nb
 nb_n0 = 0.2
-wpe_wce = 40 -- == vAe/c; needs to be small to make sure vAo/c < 1
+-- == vAe/c, used to determine B0
+wpe0_wce0 = 10
+-- p0/B0, p0 being the characteristic total pressure
 beta0 = 1
+-- guide field
 Bz0_B0 = 0
+-- initial perturbation to form island; see psi0
 pert0 = 0.1
+-- random noise to break symmetry if necessary
 Bnoise_level = 0
 Vnoise_level = 0
-gasGamma = 5/3
 
+-- derived parameters
+-- background number density
 nb = n0 * nb_n0
-wpe0 = math.sqrt(mi/me)
-wce0 = wpe0/wpe_wce
-B0 = -wce0*me/qe
+-- characteristic B field
+B0 = lightSpeed * math.sqrt(mu0 * n0 * ne_frac * me) / wpe0_wce0
+-- guide field
 Bz0 = B0 * Bz0_B0
+-- magnetic pressured based on B0
 pmag0 = B0^2/2/mu0
+-- characteristic total pressure
 p0 = pmag0*beta0
-kTtotal = p0/n0 -- k_B*(Te+Ti)
-vA0 = B0/math.sqrt(mu0*n0*mi)
-cs0 = math.sqrt(gasGamma*p0/n0/mi)
-wci0 = qi*B0/mi
-di0 = 1
-de0 = lightSpeed/wpe0
-psi0 = pert0 * di0 * B0
+-- uniform temperatures of each species
+Te0 = p0 * pe_frac / (n0 * ne_frac)
+Ti0 = p0 * pi_frac / (n0 * ni_frac)
+To0 = p0 * po_frac / (n0 * no_frac)
 
-l = 0.9
-Lx = 100
-Ly = 50
+wci0 = qi*B0/mi
+-- hydrogen plasma frequency based on number density n0*ni_frac
+wpi0 = math.sqrt(n0 * ni_frac * qi^2 / epsilon0 / mi)
+-- hydrogen inertia length based on wpi0
+di0 = lightSpeed/wpi0
+
+-- perturbation magnetic flux function
+psi0 = pert0 * di0 * B0
+-- initial current sheet thickness
+l = 0.9*di0
+
+-- box size
+Lx = 100*di0
+Ly = 50*di0
+-- grid size
 Nx = 512
 Ny = 256
+
+-- run control
 tEnd = 200/wci0
 nFrames = 20
 Lucee.IsRestarting = false
 Lucee.RestartFrame = -1
 
+-- other numerical parameters
 cfl = 0.9
 limiter = "monotonized-centered"
 elcErrorSpeedFactor = 0
 mgnErrorSpeedFactor = 1
 
+-- additional diffusion (hyper-resistivity) term to electron momentum equation
 applyDiff = true
-dtRatio = 0.1 -- dtHyp/dtDiff
--- TODO handle nonuniform grid
+-- dtHyp/dtDiff, larger value means larger diffusion and smaller time step size
+dtRatio = 0.1
+-- smallest grid size, used to compute time step size
 dMin = math.min( Lx/Nx, Ly/Ny )
+-- time step size due to cfl condition of hyperbolic equation
 dtHyp = cfl*dMin/lightSpeed
-alpha = 0.5*dMin^2/dtHyp * dtRatio
-dtDiff = 0.5*dMin^2/alpha
-canSkipDiff = true
-doResetDiff = true
+alpha = 0.5*dMin^2/dtHyp * dtRatio -- diffusion coefficient
+dtDiff = 0.5*dMin^2/alpha -- should match dtHyp / dtRatio
+canSkipDiff = true -- skip diffusion term if negative pressure/density occurs
+doResetDiff = true -- reset diffusion term, e.g., set it to zero near non-periodic boundaries
 
 numFluids = 3
 charge = {qe, qi, qo}
 mass = {me, mi, mo}
 
+-- switch to write all data in the step next to a main i/o frame
+-- e.g., if nFrame = 10, tEnd = 1, then the first main frame writes at tEnd = 0.1
+-- assume the step count is, say, 1000, then a fwd (forward) field will be written
+-- at step 1001
 writeFwdFields = false
-fwdFields_start = 0
-fwdFields_stop = 4
+-- first component of fields to be written
+fwdFields_start = 0 -- electron density
+-- last component of fields to be written + 1
+fwdFields_stop = 5 -- electron energy + 1
+-- .e.g., fwdFields_start, stop = 0, 5 will write all electron fields
 
+-- diagnostic parameters
+vAe0 = B0/math.sqrt(mu0*n0*me)
+vAi0 = B0/math.sqrt(mu0*n0*mi)
+vAo0 = B0/math.sqrt(mu0*n0*mo)
+cse0 = math.sqrt(gasGamma*p0/n0/me)
+csi0 = math.sqrt(gasGamma*p0/n0/mi)
+cso0 = math.sqrt(gasGamma*p0/n0/mo)
+
+-- J=curl B
 jzc = -B0/l/mu0
-jzc_e = jzc * Ti_Ttot
-jzc_i = jzc * Te_Ttot
+-- decomposition of current due to diamagnetic drift
+jzc_e = jzc * pi_frac
+jzc_i = jzc * pe_frac
+jzc_o = jzc * po_frac
+-- drift velocities
 vzc_e = jzc_e /qe/(n0+nb)
 vzc_i = jzc_i /qi/(n0+nb)
+vzc_o = jzc_i /qo/(n0+nb)
 
 log("====== verifications  ======")
-log("vA0/c = %g = 1/%g", vA0/lightSpeed, lightSpeed/vA0)
-log("cs0/c = %g = 1/%g", cs0/lightSpeed, lightSpeed/cs0)
+log("vAe0/c = %g = 1/%g", vAe0/lightSpeed, lightSpeed/vAe0)
+log("vAi0/c = %g = 1/%g", vAi0/lightSpeed, lightSpeed/vAi0)
+log("vAo0/c = %g = 1/%g", vAo0/lightSpeed, lightSpeed/vAo0)
+log("csi0/c = %g = 1/%g", csi0/lightSpeed, lightSpeed/csi0)
+log("cse0/c = %g = 1/%g", cse0/lightSpeed, lightSpeed/cse0)
+log("cso0/c = %g = 1/%g", cso0/lightSpeed, lightSpeed/cso0)
 log("p0/pmag0 = %g", p0/pmag0)
 log("jzc = %g B0/Ly/mu0", jzc/(B0/Ly/mu0))
 
@@ -113,18 +166,30 @@ log("p0 = %g", p0)
 log("B0 = %g", B0)
 log("jzc_e = %g", jzc_e)
 log("jzc_i = %g", jzc_i)
-log("vzc_e = %g = %g vA0", vzc_e, vzc_e/vA0)
-log("vzc_i = %g = %g vA0", vzc_i, vzc_i/vA0)
+log("jzc_o = %g", jzc_o)
+log("vzc_e = %g = %g vAi0", vzc_e, vzc_e/vAi0)
+log("vzc_i = %g = %g vAi0", vzc_i, vzc_i/vAi0)
+log("vzc_o = %g = %g vAi0", vzc_o, vzc_o/vAi0)
 
 log("======= kinetic parameters =")
 log("lightSpeed = %g", lightSpeed)
 log("mu0 = %g", mu0)
+log(" ====== masses")
 log("me = %g", me)
 log("mi = %g", mi)
 log("mo = %g", mo)
+log(" ====== charges")
 log("qe = %g", qe)
 log("qi = %g", qi)
 log("qo = %g", qo)
+log(" ====== pressure fractions")
+log("pe_frac = %g", pe_frac)
+log("pi_frac = %g", pi_frac)
+log("po_frac = %g", po_frac)
+log(" ====== number density fractions")
+log("ne_frac = %g", ne_frac)
+log("ni_frac = %g", ni_frac)
+log("no_frac = %g", no_frac)
 
 log("====== other parameters ====")
 log("dtHyp/dtDiff = %g", dtHyp/dtDiff)
@@ -141,9 +206,9 @@ init = function(x,y,z)
    local Pi = Lucee.Pi
 
    local n = n0 * icosh2y + nb
-   local n_e = n * ne_ntot
-   local n_i = n * ni_ntot
-   local n_o = n * no_ntot
+   local n_e = n * ne_frac
+   local n_i = n * ni_frac
+   local n_o = n * no_frac
    local rho_e = n_e*me
    local rho_i = n_i*mi
    local rho_o = n_o*mo
@@ -159,19 +224,18 @@ init = function(x,y,z)
    local rhovx_i, rhovy_i = 0,0
    local rhovx_o, rhovy_o = 0,0
    local jz = -B0/l/mu0 * icosh2y
-   local jz_e = jz * Te_Ttot -- current partition due to diamagnetic drift
+   local jz_e = jz * pe_frac -- current partition due to diamagnetic drift
    local rhovz_e = jz_e * me/qe * (1 + Vnoise_level*math.random()*math.random(-1,1))
-   local jz_i = jz * Ti_Ttot
+   local jz_i = jz * pi_frac
    local rhovz_i = jz_i * mi/qi * (1 + Vnoise_level*math.random()*math.random(-1,1))
-   local jz_o = jz * To_Ttot
+   local jz_o = jz * po_frac
    local rhovz_o = jz_o * mo/qo * (1 + Vnoise_level*math.random()*math.random(-1,1))
 
-   local p = n*kTtotal
-   local p_e = p * Te_Ttot
+   local p_e = n * Te0
    local u_e = p_e / (gasGamma-1) + 0.5*rhovz_e^2/rho_e
-   local p_i = p * Ti_Ttot 
+   local p_i = n * Ti0
    local u_i = p_i / (gasGamma-1) + 0.5*rhovz_i^2/rho_i
-   local p_o = p * Ti_Ttot 
+   local p_o = n * To0 
    local u_o = p_o / (gasGamma-1) + 0.5*rhovz_o^2/rho_o
 
    local Ex,Ey,Ez = 0, 0, 0
@@ -239,6 +303,7 @@ end
 ----------
 -- DATA --
 ----------
+-- create arrays to store data
 createData = function(numComponents)
    if not numComponents then
       numComponents = numFluids*5+8
@@ -249,10 +314,15 @@ createData = function(numComponents)
       ghost = {2, 2},
    }
 end
+-- input of sweep along x
 q = createData()
+-- output of sweep along x and input of sweep along y
 qX = createData()
+-- output of sweep along y and input of sweep along z
 qNew = createData()
+-- used to save old data in case the whole step should be re-taken
 qDup = createData()
+
 if applyDiff then
    qDiff = createData(1)
    if canSkipDiff then
@@ -270,14 +340,19 @@ elcNew,ionNew,oxyNew,emfNew = getFields(qNew)
 ---------------------------------------
 -- HYPERBOLIC EQUATIONS AND SOLVERS --
 ---------------------------------------
+-- default equation using Roe flux
 fluidEqn = HyperEquation.Euler { gasGamma = gasGamma, }
+-- posistivity-conserving equation using Lax flux
 fluidEqnLax = HyperEquation.Euler { gasGamma = gasGamma, numericalFlux = "lax" }
+-- perfectly hyperbolic Maxwell equation
 emfEqn = HyperEquation.PhMaxwell {
    lightSpeed = lightSpeed,
+   -- divE and divB cleaning
    elcErrorSpeedFactor = elcErrorSpeedFactor,
    mgnErrorSpeedFactor = mgnErrorSpeedFactor,
 }
 
+-- function to get solver of given equation (myEqn) along a given direction (myDir)
 createSlvrDir = function(myEqn, input, output, myDir, myLimiter)
    local slvr = Updater.WavePropagation2D {
       onGrid = grid,
@@ -334,6 +409,8 @@ elcOut = {elcX, elcNew}
 ionOut = {ionX, ionNew}
 oxyOut = {oxyX, oxyNew}
 
+-- myStatus can be false if time step size is too large
+-- useLaxFlux can be true if negative density/pressure occurs
 function updateHyperEqns(tCurr, tEnd)
    local myStatus = true
    local myDtSuggested = 1e3*math.abs(tEnd-tCurr)
@@ -396,6 +473,7 @@ srcSlvr = Updater.ImplicitFiveMomentSrc2D {
    linearSolver = "partialPivLu",
 }
 
+-- apply diffusion on momentum equation(s)
 if applyDiff then
    diffCalc = Updater.RectSecondOrderCentralDiff2D { onGrid = grid }
   
@@ -415,6 +493,8 @@ function updateSource(elcIn, ionIn, oxyIn, emfIn, tCurr, tEnd)
    if applyDiff then
       local rhov_e3 = elcIn:alias(1,4)
       if (canSkipDiff) then
+         -- duplicate all momentum terms, would be copied back if 
+         -- diffusion causes negative density/pressure
          rhovDup:copy(rhov_e3)
       end
       for dir = 0,2 do
@@ -553,10 +633,16 @@ function runSimulation(tStart, tEnd, nFrames, initDt)
          if status then
             useLaxFlux = false
          end
+         -- status can be false if time step size is too large,
+         -- will retake with new, smaller time step size
       else
          log("Taking step %5d (%4d in frame %3d); t = %10g, dt = %10g",
                step, stepInFrame, frame, tCurr, myDt)
          status, dtSuggested, useLaxFlux = updateSystem(tCurr, tCurr+myDt)
+         -- status is false if time step size is too large,
+         -- will retake with new, smaller time step size;
+         -- useLaxFlux is true if negative density/pressure occurs,
+         -- will retake with Lax flux
       end
 
       if not status then
