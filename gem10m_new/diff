@@ -1,0 +1,103 @@
+107c107
+< cfl = 0.9
+---
+> cfl = 0.3
+344c344
+< -- input of sweep along x
+---
+> -- input of unsplit scheme
+346,348c346
+< -- output of sweep along x and input of sweep along y
+< qX = createData()
+< -- output of sweep along y and input of sweep along z
+---
+> -- final output
+365d362
+< elcX,ionX,emfX = getFields(qX)
+386c383
+< createSlvrDir = function(myEqn, input, output, myDir, myLimiter)
+---
+> createSlvrDir = function(myEqn, input, output, myLimiter)
+395c392
+<       updateDirections = {myDir}
+---
+>       --updateDirections = {myDir}
+402,424c399,405
+< -- solvers using roe fluxes along X
+< elcEqnSlvrDir0 = createSlvrDir(fluidEqn, elc, elcX, 0, limiter)
+< ionEqnSlvrDir0 = createSlvrDir(fluidEqn, ion, ionX, 0, limiter)
+< --oxyEqnSlvrDir0 = createSlvrDir(fluidEqn, oxy, oxyX, 0, limiter)
+< emfEqnSlvrDir0 = createSlvrDir(emfEqn, emf, emfX, 0, limiter)
+< 
+< -- solvers using roe fluxes along Y
+< elcEqnSlvrDir1 = createSlvrDir(fluidEqn, elcX, elcNew, 1, limiter)
+< ionEqnSlvrDir1 = createSlvrDir(fluidEqn, ionX, ionNew, 1, limiter)
+< --oxyEqnSlvrDir1 = createSlvrDir(fluidEqn, oxyX, oxyNew, 1, limiter)
+< emfEqnSlvrDir1 = createSlvrDir(emfEqn, emfX, emfNew, 1, limiter)
+< 
+< -- solvers using Lax fluxes along X, has to use 'zero' limiter to guarantee positivity
+< elcEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, elc, elcX, 0, "zero")
+< ionEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, ion, ionX, 0, "zero")
+< --oxyEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, oxy, oxyX, 0, "zero")
+< emfEqnSlvrDir0Lax = createSlvrDir(emfEqn, emf, emfX, 0, "zero")
+< 
+< -- solvers using Lax fluxes along Y, has to use 'zero' limiter to guarantee positivity
+< elcEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, elcX, elcNew, 1, "zero")
+< ionEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, ionX, ionNew, 1, "zero")
+< --oxyEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, oxyX, oxyNew, 1, "zero")
+< emfEqnSlvrDir1Lax = createSlvrDir(emfEqn, emfX, emfNew, 1, "zero")
+---
+> elcEqnSlvr = createSlvrDir(fluidEqn, elc, elcNew, limiter)
+> ionEqnSlvr = createSlvrDir(fluidEqn, ion, ionNew, limiter)
+> emfEqnSlvr = createSlvrDir(emfEqn, emf, emfNew, limiter)
+> 
+> elcEqnSlvrLax = createSlvrDir(fluidEqnLax, elc, elcNew, "zero")
+> ionEqnSlvrLax = createSlvrDir(fluidEqnLax, ion, ionNew, "zero")
+> emfEqnSlvrLax = createSlvrDir(emfEqn, emf, emfNew, "zero")
+429,444c410,411
+< slvrs = {
+<    {elcEqnSlvrDir0, ionEqnSlvrDir0, emfEqnSlvrDir0},
+<    {elcEqnSlvrDir1, ionEqnSlvrDir1, emfEqnSlvrDir1},
+< }
+< 
+< slvrsLax = {
+<    {elcEqnSlvrDir0Lax, ionEqnSlvrDir0Lax, emfEqnSlvrDir0Lax},
+<    {elcEqnSlvrDir1Lax, ionEqnSlvrDir1Lax, emfEqnSlvrDir1Lax},
+< }
+< 
+< qIn = {q, qX}
+< qOut = {qX, qNew}
+< 
+< elcOut = {elcX, elcNew}
+< ionOut = {ionX, ionNew}
+< --oxyOut = {oxyX, oxyNew}
+---
+> slvrs = {elcEqnSlvr, ionEqnSlvr, emfEqnSlvr}
+> slvrsLax = {elcEqnSlvrLax, ionEqnSlvrLax, emfEqnSlvrLax}
+453,455c420,421
+<    for d = 0,1 do
+<       applyBc(qIn[d+1], tCurr, tEnd)
+<       for i,slvr in ipairs(slvrs[d+1]) do
+---
+>       applyBc(q, tCurr, tEnd)
+>       for i,slvr in ipairs(slvrs) do
+462,465c428,430
+<       if ((fluidEqn:checkInvariantDomain(elcOut[d+1]) == false)
+<        or (fluidEqn:checkInvariantDomain(ionOut[d+1]) == false)
+<        --or (fluidEqn:checkInvariantDomain(oxyOut[d+1]) == false)
+<        or (qOut[d+1]:hasNan())) then
+---
+>       if ((fluidEqn:checkInvariantDomain(elcNew) == false)
+>        or (fluidEqn:checkInvariantDomain(ionNew) == false)
+>        or (qNew:hasNan())) then
+472d436
+<    end
+481,483c445,446
+<    for d = 0,1 do
+<       applyBc(qIn[d+1], tCurr, tEnd)
+<       for i,slvr in ipairs(slvrsLax[d+1]) do
+---
+>       applyBc(q, tCurr, tEnd)
+>       for i,slvr in ipairs(slvrsLax) do
+493d455
+<    end
