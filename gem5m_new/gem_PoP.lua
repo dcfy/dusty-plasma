@@ -17,7 +17,7 @@ end
 lightSpeed = 1
 mu0 = 1
 epsilon0 = 1/lightSpeed^2/mu0
-gasGamma = 5/3
+gasGamma = 5.0/3.0
 
 -- mass and charge of each species
 -- e-
