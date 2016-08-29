@@ -45,9 +45,9 @@ no_frac = 1/2
 n0 = 1
 -- to compute background number density nb
 nb_n0 = 0.2
--- == vAe/c, used to determine B0
+-- == c/vAe0, used to determine B0
 wpe0_wce0 = 10
--- p0/B0, p0 being the characteristic total pressure
+-- p0/pmag0=p0/(B0^2/2/mu0), used to determine p0, the characteristic total pressure
 beta0 = 1
 -- guide field
 Bz0_B0 = 0
@@ -140,6 +140,7 @@ csi0 = math.sqrt(gasGamma*p0/n0/mi)
 cso0 = math.sqrt(gasGamma*p0/n0/mo)
 
 -- J=curl B
+-- current at sheet center
 jzc = -B0/l/mu0
 -- decomposition of current due to diamagnetic drift
 jzc_e = jzc * pi_frac
@@ -333,6 +334,7 @@ end
 getFields = function(myQ)
    return myQ:alias(0,5), myQ:alias(5,10), myQ:alias(10,15), myQ:alias(15,23)
 end
+-- elc, ion etc. points to corresponding data in q
 elc,ion,oxy,emf = getFields(q)
 elcX,ionX,oxyX,emfX = getFields(qX)
 elcNew,ionNew,oxyNew,emfNew = getFields(qNew)
@@ -369,21 +371,25 @@ createSlvrDir = function(myEqn, input, output, myDir, myLimiter)
    return slvr
 end
 
+-- solvers using roe fluxes along X
 elcEqnSlvrDir0 = createSlvrDir(fluidEqn, elc, elcX, 0, limiter)
 ionEqnSlvrDir0 = createSlvrDir(fluidEqn, ion, ionX, 0, limiter)
 oxyEqnSlvrDir0 = createSlvrDir(fluidEqn, oxy, oxyX, 0, limiter)
 emfEqnSlvrDir0 = createSlvrDir(emfEqn, emf, emfX, 0, limiter)
 
+-- solvers using roe fluxes along Y
 elcEqnSlvrDir1 = createSlvrDir(fluidEqn, elcX, elcNew, 1, limiter)
 ionEqnSlvrDir1 = createSlvrDir(fluidEqn, ionX, ionNew, 1, limiter)
 oxyEqnSlvrDir1 = createSlvrDir(fluidEqn, oxyX, oxyNew, 1, limiter)
 emfEqnSlvrDir1 = createSlvrDir(emfEqn, emfX, emfNew, 1, limiter)
 
+-- solvers using Lax fluxes along X, has to use 'zero' limiter to guarantee positivity
 elcEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, elc, elcX, 0, "zero")
 ionEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, ion, ionX, 0, "zero")
 oxyEqnSlvrDir0Lax = createSlvrDir(fluidEqnLax, oxy, oxyX, 0, "zero")
 emfEqnSlvrDir0Lax = createSlvrDir(emfEqn, emf, emfX, 0, "zero")
 
+-- solvers using Lax fluxes along Y, has to use 'zero' limiter to guarantee positivity
 elcEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, elcX, elcNew, 1, "zero")
 ionEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, ionX, ionNew, 1, "zero")
 oxyEqnSlvrDir1Lax = createSlvrDir(fluidEqnLax, oxyX, oxyNew, 1, "zero")
@@ -569,6 +575,45 @@ end
 ------------
 -- OUTPUT --
 ------------
+-- A generic function to run an updater
+function runUpdater(updater, tCurr, dt, inpFlds, outFlds)
+   updater:setCurrTime(tCurr)
+   if inpFlds then
+      updater:setIn(inpFlds)
+   end
+   if outFlds then
+      updater:setOut(outFlds)
+   end
+   return updater:advance(tCurr+dt)
+end
+
+-- dynvector to store integrated flux
+ByAlias = qNew:alias(19, 20) -- By
+ByFlux = DataStruct.DynVector { numComponents = 1 }
+ByFluxCalc = Updater.IntegrateFieldAlongLine2D {
+   onGrid = grid,
+   -- start cell
+   startCell = {0, Ny/2},
+   -- direction to integrate in
+   dir = 0,
+   -- number of cells to integrate
+   numCells = Nx,
+   -- integrand
+   integrand = function (By)
+      return math.abs(By)
+   end,
+}
+
+function calcDiagnostics(tCurr, dt)
+   runUpdater(ByFluxCalc, tCurr, dt, {ByAlias}, {ByFlux})
+end
+
+function writeDiagnostics(frame)
+   ByFlux:write( string.format("ByFlux_%d.h5", frame) )
+end
+
+-- start and stop are first and last components to be written
+-- if start or stop is not set, all components are written
 function runOutput(myQ, frame, tCurr, tag, start, stop)
    if not tag then
       tag = "q"
@@ -659,10 +704,14 @@ function runSimulation(tStart, tEnd, nFrames, initDt)
             break
          end
 
+        -- compute diagnostics
+        calcDiagnostics(tCurr, myDt)
+
          q:copy(qNew)
          tCurr = tCurr + myDt
          if (tCurr > tNextFrame or tCurr >= tEnd or outputEveryStep) then
             log(">>> Writing output %d at t = %g...", frame, tCurr)
+            writeDiagnostics(frame)
             runOutput(qNew, frame, tCurr)
             frame = frame + 1
             tNextFrame = tNextFrame + tFrame
